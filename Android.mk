@@ -135,6 +135,7 @@ $(iso_dir): $(shell find $(LOCAL_PATH)/iso -type f | sort -r) | $(ACP)
 	$(ACP) -pr $(dir $<) $@
 	$(hide) sed -i "s|OS_TITLE|$(if $(RELEASE_OS_TITLE),$(RELEASE_OS_TITLE),Android-x86)|" $@/boot/grub/grub.cfg
 	$(hide) sed -i "s|BlissOSLive|$(OS_LABEL)|" $@/boot/grub/grub.cfg
+	$(hide) sed -i "s|ROOT=LABEL=[^ \"]*|ROOT=LABEL=$(DISK_LABEL)|" $@/boot/grub/grub.cfg
 	$(hide) sed -i "s|CMDLINE|$(BOARD_KERNEL_CMDLINE)|" $@/boot/grub/grub.cfg
 	$(hide) sed -i "s|VER|$(VER)|" $@/boot/grub/grub.cfg
 	$(hide) echo "$(BOARD_KERNEL_CMDLINE)" > $@/cmdline.txt
@@ -154,5 +155,31 @@ $(ISO_IMAGE): $(iso_dir) $(BUILT_IMG)
 
 .PHONY: iso_img
 iso_img: $(ISO_IMAGE)
+
+# Native-installer ISO variant (LOS-TV): same pipeline as iso_img, but the
+# external install.sfs payload is omitted — installation runs from live
+# Android via the installer APK (packed in later). Deleting this block
+# affects nothing else.
+NATIVE_ISO_IMAGE := $(PRODUCT_OUT)/lineage-$(LINEAGE_VERSION)-native.iso
+native_iso_dir := $(PRODUCT_OUT)/iso_native
+$(native_iso_dir): $(iso_dir)
+	$(hide) rm -rf $@
+	$(ACP) -pr $< $@
+	$(hide) rm -f $@/install.sfs
+	$(hide) sed -i "/INSTALL=install.sfs/d" $@/boot/grub/grub.cfg
+$(NATIVE_ISO_IMAGE): $(native_iso_dir) $(BUILT_IMG)
+	@echo ----- Making native iso image ------
+	PATH="/sbin:/usr/sbin:/bin:/usr/bin"; \
+	xorriso -as mkisofs -graft-points --modification-date=$(MOD_DATE) -b /boot/grub/i386-pc/eltorito.img \
+		-no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info --grub2-mbr $(BOOT_HYBRID) \
+		-hfsplus -apm-block-size 2048 -hfsplus-file-creator-type chrp tbxj /System/Library/CoreServices/.disk_label \
+		-hfs-bless-by i /System/Library/CoreServices/boot.efi --efi-boot efi.img -efi-boot-part --efi-boot-image \
+		--protective-msdos-label -o $@ $^ --sort-weight 0 / --sort-weight 1 /boot \
+		-V "$(DISK_LABEL)"
+	$(hide) $(SHA256) $(NATIVE_ISO_IMAGE) | sed "s|$(PRODUCT_OUT)/||" > $(NATIVE_ISO_IMAGE).sha256sum
+	@echo "Package Complete: $(NATIVE_ISO_IMAGE)" >&2
+
+.PHONY: iso_img_native
+iso_img_native: $(NATIVE_ISO_IMAGE)
 
 endif
